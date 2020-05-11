@@ -1,51 +1,40 @@
 const { io } = require('../server');
-const { TicketControl } = require('../classes/ticket-control');
+const { Usuarios } = require('../classes/usuarios');
 
+const { crearMensaje } = require('../utils/utils');
 
-const ticketControl = new TicketControl();
-
-
+const usuarios = new Usuarios();
 
 io.on('connection', (client) => {
-
-    client.on('siguienteTicket', (data, callback) => {
-
-        let siguiente = ticketControl.siguiente();
-
-        console.log(siguiente);
-        callback(siguiente);
-    });
-
-
-    client.emit('estadoActual', {
-        actual: ticketControl.getUltimoTicket(),
-        ultimos4: ticketControl.getUltimos4()
-    });
-
-    client.on('atenderTicket', (data, callback) => {
-
-        if (!data.escritorio) {
+    client.on('entrarChat', (usuario, callback) => {
+        if(!usuario.nombre || !usuario.sala){
             return callback({
-                err: true,
-                mensaje: 'El escritorio es necesario'
+                error: true,
+                mensaje: 'El nombre es necesario'
             });
         }
+        client.join(usuario.sala);
+        let personas =  usuarios.agregarPersona(client.id, usuario.nombre, usuario.sala);
 
+        client.broadcast.to(usuario.sala).emit('listaPersonas', usuarios.getPersonasPorSala(usuario.sala));
+        callback(usuarios.getPersonasPorSala(usuario.sala));
+    });
+    client.on('crearMensaje', (data) => {
+        let persona = usuarios.getPersona(client.id)
+        let mensaje = crearMensaje(persona.nombre, data.mensaje);
+        client.broadcast.to(persona.sala).emit('crearMensaje', mensaje);
+    });
 
-        let atenderTicket = ticketControl.atenderTicket(data.escritorio);
-
-
-        callback(atenderTicket);
-
-        // actualizar/ notificar cambios en los ULTIMOS 4
-        client.broadcast.emit('ultimos4', {
-            ultimos4: ticketControl.getUltimos4()
-        });
-
+    client.on('disconnect', () => {
+       let personaBorrada = usuarios.borrarPersona(client.id);
+       client.broadcast.to(personaBorrada.sala).emit('crearMensaje', crearMensaje('Administrador', `${personaBorrada.nombre} abandonó el chat`));
+       client.broadcast.to(personaBorrada.sala).emit('listaPersonas', usuarios.getPersonasPorSala(personaBorrada.sala));
 
     });
 
-
-
-
+    // Mensajes privados
+    client.on('mensajePrivado', data => {
+        let persona = usuarios.getPersona(client.id);
+        client.broadcast.to(data.para).emit('mensajePrivado', crearMensaje(persona.nombre, data.mensaje));
+    })
 });
